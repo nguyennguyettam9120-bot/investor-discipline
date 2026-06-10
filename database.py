@@ -62,8 +62,11 @@ def _translate_sql(sql):
 
 
 if USE_POSTGRES:
-    import psycopg2
-    from psycopg2.extras import DictCursor
+    try:
+        import psycopg2
+        from psycopg2.extras import DictCursor
+    except ImportError:
+        USE_POSTGRES = False
 
     class _PGCursor:
         """Cursor bọc psycopg2, tự dịch SQL và hỗ trợ row dạng dict + index."""
