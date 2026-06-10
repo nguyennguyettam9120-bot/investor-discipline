@@ -3286,6 +3286,48 @@ def page_community():
 
 # ─── MARKET NEWS (Góc thị trường) ──────────────────────────────────────────────
 
+def _auto_generate_market_news(week_label):
+    """Tự động sinh Góc thị trường bằng AI mỗi tuần, dựa trên Regime Radar.
+    Gọi 1 lần/tuần bởi user đầu tiên. Chi phí ~$0.008/tuần."""
+    try:
+        latest_radar = get_regime_radar_latest()
+        if latest_radar:
+            ctx = (f"Regime hiện tại: {latest_radar.get('regime_call','?')}. "
+                   f"VIX: {latest_radar.get('vix','?')}. "
+                   f"VN-Index: {latest_radar.get('vn_vs_ma200','?')}. "
+                   f"Ghi chú admin: {latest_radar.get('note_vi','')}")
+        else:
+            ctx = "Chưa có dữ liệu Regime Radar. Viết bài mang tính giáo dục chung về kỷ luật."
+
+        client = anthropic.Anthropic()
+        prompt = f"""Bạn viết mục "Góc thị trường" cho app luyện kỷ luật đầu tư (triết lý: Risk First, Regime First, Evidence First). Viết NGẮN (3-4 câu), mang tính giáo dục về kỷ luật, KHÔNG dự đoán giá, KHÔNG khuyến nghị mua bán cổ phiếu cụ thể, KHÔNG bịa số liệu chính xác.
+
+BỐI CẢNH TUẦN NÀY:
+{ctx}
+
+Liên hệ với 1 nguyên tắc kỷ luật của app. Trả về CHỈ JSON thuần (không markdown):
+{{"headline_vi":"...","headline_en":"...","body_vi":"...","body_en":"...","lesson_link":"VD: Bài 2 - Regime First"}}"""
+
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514", max_tokens=700,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        import json
+        text = resp.content[0].text.strip()
+        if "```" in text:
+            text = text.split("```")[1].replace("json", "", 1).strip()
+        d = json.loads(text)
+        save_market_news(
+            -1, week_label,
+            d["headline_vi"], d.get("headline_en", d["headline_vi"]),
+            d["body_vi"], d.get("body_en", d["body_vi"]),
+            d.get("lesson_link", ""),
+        )
+        return True
+    except Exception:
+        return False
+
+
 def page_market_news():
     st.header(t("📰 Góc thị trường tuần này", "📰 This Week's Market Corner"))
     st.caption(t(
@@ -3294,13 +3336,27 @@ def page_market_news():
     ))
 
     user = st.session_state.user
+    from datetime import date as _dcls
+    _today = _dcls.today()
+    _this_week = f"Tuần {_today.isocalendar()[1]}/{_today.year}"
     news_list = get_market_news_latest(3)
+
+    # Tự động sinh bằng AI nếu tuần này chưa có bài (1 lần/tuần, dùng chung)
+    has_this_week = any(n.get("week_label") == _this_week for n in news_list)
+    if not has_this_week:
+        with st.spinner(t("Đang chuẩn bị góc thị trường tuần này...", "Preparing this week's market corner...")):
+            if _auto_generate_market_news(_this_week):
+                news_list = get_market_news_latest(3)
 
     if news_list:
         for news in news_list:
             with st.container(border=True):
                 st.markdown(f"### {news[f'headline_{st.session_state.lang}']}")
-                st.caption(f"📅 {news['week_label']}")
+                src = news.get("user_id") == -1
+                cap = f"📅 {news['week_label']}"
+                if src:
+                    cap += t("  ·  🤖 AI tự tạo", "  ·  🤖 AI-generated")
+                st.caption(cap)
                 st.markdown(news[f"body_{st.session_state.lang}"])
                 if news.get("lesson_link"):
                     st.markdown(t(

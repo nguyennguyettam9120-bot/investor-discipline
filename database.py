@@ -1,17 +1,136 @@
 import sqlite3
 import bcrypt
 import os
+import re
 from datetime import date, datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "app.db")
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DUAL-MODE DATABASE: tự động dùng Supabase (Postgres) nếu có cấu hình,
+# nếu không thì fallback về SQLite (chạy local an toàn).
+#
+# Để bật Supabase: thêm vào Streamlit Secrets:
+#     SUPABASE_DB_URL = "postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres"
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_secret(key):
+    try:
+        import streamlit as st
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.environ.get(key)
+
+
+_SUPABASE_URL = _get_secret("SUPABASE_DB_URL")
+USE_POSTGRES = bool(_SUPABASE_URL)
+
+
+def _translate_sql(sql):
+    """Chuyển cú pháp SQLite sang Postgres.
+    Giữ cột thời gian dạng TEXT (như SQLite) — hàm datetime trả về text ISO
+    để so sánh từ điển vẫn đúng theo thời gian."""
+    TS = "'YYYY-MM-DD HH24:MI:SS'"
+    # datetime('now', ?) -> to_char(NOW() + (?)::interval, ...)  [trước placeholder]
+    sql = sql.replace(
+        "datetime('now', ?)",
+        f"to_char(NOW() + (?)::interval, {TS})",
+    )
+    # datetime('now', '-N days') (có/không khoảng trắng)
+    sql = re.sub(
+        r"datetime\('now',\s*'-(\d+)\s*days?'\)",
+        lambda m: f"to_char(NOW() - INTERVAL '{m.group(1)} days', {TS})",
+        sql,
+    )
+    # datetime('now') -> to_char(NOW(), ...)
+    sql = sql.replace("datetime('now')", f"to_char(NOW(), {TS})")
+    # DATE(col) trên cột text -> ép kiểu để Postgres hiểu
+    sql = re.sub(r"\bDATE\((\w+)\)", r"(\1)::date", sql)
+    # Kiểu khóa chính tự tăng
+    sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+    # INSERT OR IGNORE -> INSERT ... ON CONFLICT DO NOTHING
+    has_insert_or_ignore = "INSERT OR IGNORE" in sql
+    sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
+    # Placeholder ? -> %s
+    sql = sql.replace("?", "%s")
+    if has_insert_or_ignore:
+        sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+    return sql
+
+
+if USE_POSTGRES:
+    import psycopg2
+    from psycopg2.extras import DictCursor
+
+    class _PGCursor:
+        """Cursor bọc psycopg2, tự dịch SQL và hỗ trợ row dạng dict + index."""
+        def __init__(self, cur):
+            self._cur = cur
+
+        def execute(self, sql, params=()):
+            self._cur.execute(_translate_sql(sql), params)
+            return self
+
+        def fetchone(self):
+            return self._cur.fetchone()
+
+        def fetchall(self):
+            return self._cur.fetchall()
+
+        @property
+        def lastrowid(self):
+            try:
+                row = self._cur.fetchone()
+                return row[0] if row else None
+            except Exception:
+                return None
+
+        def close(self):
+            self._cur.close()
+
+    class _PGConnection:
+        """Connection bọc psycopg2 để hành xử giống sqlite3.Connection."""
+        def __init__(self, dsn):
+            self._conn = psycopg2.connect(dsn)
+            self._conn.autocommit = False
+
+        def cursor(self):
+            return _PGCursor(self._conn.cursor(cursor_factory=DictCursor))
+
+        def execute(self, sql, params=()):
+            cur = self._conn.cursor(cursor_factory=DictCursor)
+            cur.execute(_translate_sql(sql), params)
+            return _PGCursor(cur)
+
+        def commit(self):
+            self._conn.commit()
+
+        def rollback(self):
+            self._conn.rollback()
+
+        def close(self):
+            self._conn.close()
+
+    # Lỗi trùng khóa của Postgres — để code cũ bắt được như sqlite3.IntegrityError
+    IntegrityError = psycopg2.IntegrityError
+
+    def get_conn():
+        return _PGConnection(_SUPABASE_URL)
+
+else:
+    IntegrityError = sqlite3.IntegrityError
+
+    def get_conn():
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    if not USE_POSTGRES:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = get_conn()
     c = conn.cursor()
 
@@ -134,8 +253,12 @@ def register_user(username, email, password):
         )
         conn.commit()
         return True, "ok"
-    except sqlite3.IntegrityError as e:
-        msg = str(e)
+    except IntegrityError as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        msg = str(e).lower()
         if "username" in msg:
             return False, "username_taken"
         elif "email" in msg:
