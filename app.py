@@ -298,8 +298,8 @@ def show_payment_modal():
 **Hướng dẫn thanh toán thủ công:**
 
 Chuyển khoản ngân hàng — **{PRICE:,} ₫/tháng**:
-- **Ngân hàng:** Vietcombank
-- **Số TK:** 0651000778247
+- **Ngân hàng:** MB Bank
+- **Số TK:** 1234567890
 - **Chủ TK:** NGUYEN THI NGUYET TAM
 - **Nội dung CK:** `PRO_{user['username']}`
 
@@ -737,6 +737,13 @@ def show_sidebar():
             ))
             if st.button(t("Xem chi tiết", "See details"), key="sidebar_upgrade"):
                 st.session_state["show_upgrade"] = True
+
+        # Admin dashboard button
+        if is_admin(user.get("username", "")):
+            st.divider()
+            if st.button("🛠️ Admin Dashboard", key="admin_dash_btn", use_container_width=True, type="primary"):
+                st.session_state["show_admin"] = True
+                st.rerun()
 
         st.divider()
         if st.button(t("🚪 Đăng xuất", "🚪 Sign out"), key="logout"):
