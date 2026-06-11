@@ -114,6 +114,63 @@ def send_welcome_email(to_email, username, lang="vi"):
         return False, str(e)
 
 
+# ─── ADMIN NOTIFICATION EMAIL ────────────────────────────────────────────────────
+
+def send_admin_notification(event_type, username, email=None, extra=None):
+    """Gửi email thông báo cho admin khi có sự kiện (user mới, upgrade Pro...).
+    Gửi tới ADMIN_NOTIFY_EMAIL nếu có cấu hình, nếu không thì gửi về chính
+    GMAIL_ADDRESS. Không bao giờ làm crash luồng chính — chỉ trả (ok, msg)."""
+    gmail = _get_secret("GMAIL_ADDRESS")
+    app_pw = _get_secret("GMAIL_APP_PASSWORD")
+    if not gmail or not app_pw:
+        return False, "email_not_configured"
+
+    to_email = _get_secret("ADMIN_NOTIFY_EMAIL") or gmail
+
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    if event_type == "signup":
+        subject = f"🆕 User mới đăng ký: {username}"
+        title = "Có user mới đăng ký! 🎉"
+        color = "#1D4ED8"
+    elif event_type == "upgrade":
+        subject = f"💎 Upgrade Pro: {username}"
+        title = "Có user nâng cấp lên Pro! 💎"
+        color = "#16a34a"
+    else:
+        subject = f"🔔 Thông báo: {event_type}"
+        title = str(event_type)
+        color = "#1D4ED8"
+
+    rows = f"<p><strong>Username:</strong> {username}</p>"
+    if email:
+        rows += f"<p><strong>Email:</strong> {email}</p>"
+    if extra:
+        rows += f"<p><strong>Chi tiết:</strong> {extra}</p>"
+    rows += f"<p><strong>Thời gian:</strong> {ts}</p>"
+
+    body_html = f"""<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#1e293b">
+  <h2 style="color:{color}">{title}</h2>
+  {rows}
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0">
+  <p style="font-size:12px;color:#64748b">Investor Discipline — thông báo tự động</p>
+</div>"""
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"Investor Discipline <{gmail}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText(body_html, "html"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(gmail, app_pw)
+            server.sendmail(gmail, to_email, msg.as_string())
+        return True, "sent"
+    except Exception as e:
+        return False, str(e)
+
+
 # ─── PAYOS PAYMENT ───────────────────────────────────────────────────────────────
 
 def is_payos_configured():

@@ -303,6 +303,22 @@ def init_db():
 
 # ─── AUTH ──────────────────────────────────────────────────────────────────────
 
+def _notify_admin_async(event_type, username, email=None, extra=None):
+    """Gửi email thông báo cho admin ở luồng nền (daemon thread) để KHÔNG làm
+    chậm thao tác của user và KHÔNG bao giờ làm crash app nếu email lỗi."""
+    def _run():
+        try:
+            import integrations
+            integrations.send_admin_notification(event_type, username, email=email, extra=extra)
+        except Exception:
+            pass
+    try:
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
 def register_user(username, email, password):
     conn = get_conn()
     try:
@@ -312,6 +328,7 @@ def register_user(username, email, password):
             (username.strip().lower(), email.strip().lower(), pw_hash)
         )
         conn.commit()
+        _notify_admin_async("signup", username.strip().lower(), email=email.strip().lower())
         return True, "ok"
     except IntegrityError as e:
         try:
@@ -358,7 +375,18 @@ def upgrade_user_plan(user_id, plan="pro"):
     conn = get_conn()
     conn.execute("UPDATE users SET plan=? WHERE id=?", (plan, user_id))
     conn.commit()
+    # Lấy thông tin user để thông báo cho admin (chỉ khi nâng lên pro)
+    info = None
+    if plan == "pro":
+        try:
+            info = conn.execute(
+                "SELECT username, email FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+        except Exception:
+            info = None
     conn.close()
+    if plan == "pro" and info:
+        _notify_admin_async("upgrade", info["username"], email=info["email"])
 
 
 # ─── JOURNAL ───────────────────────────────────────────────────────────────────
