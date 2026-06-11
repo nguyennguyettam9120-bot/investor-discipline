@@ -94,11 +94,47 @@ if USE_POSTGRES:
         def close(self):
             self._cur.close()
 
+    # ── Connection pool: tái sử dụng kết nối để giảm độ trễ tới Supabase ──
+    # Mỗi lần mở kết nối mới tới Supabase (Singapore) tốn ~100-300ms cho việc
+    # bắt tay TCP/TLS/xác thực. Pool giữ sẵn vài kết nối "ấm" và tái sử dụng,
+    # nên mỗi truy vấn nhanh hơn nhiều. Keepalives giữ kết nối khỏi bị rớt.
+    from psycopg2 import pool as _pg_pool_mod
+
+    def _new_pool():
+        return _pg_pool_mod.ThreadedConnectionPool(
+            1, 8, _SUPABASE_URL,
+            connect_timeout=10,
+            keepalives=1, keepalives_idle=30,
+            keepalives_interval=10, keepalives_count=5,
+        )
+
+    # Cache pool qua Streamlit (tạo 1 lần, sống xuyên các lần rerun).
+    # Nếu không có Streamlit (chạy script thuần) thì dùng singleton thường.
+    try:
+        import streamlit as _st_cache
+        _get_pool = _st_cache.cache_resource(_new_pool, show_spinner=False)
+    except Exception:
+        _PG_POOL_SINGLETON = None
+
+        def _get_pool():
+            global _PG_POOL_SINGLETON
+            if _PG_POOL_SINGLETON is None:
+                _PG_POOL_SINGLETON = _new_pool()
+            return _PG_POOL_SINGLETON
+
     class _PGConnection:
-        """Connection bọc psycopg2 để hành xử giống sqlite3.Connection."""
-        def __init__(self, dsn):
-            self._conn = psycopg2.connect(dsn)
-            self._conn.autocommit = False
+        """Connection bọc psycopg2 (mượn từ pool) để hành xử giống sqlite3.Connection."""
+        def __init__(self):
+            try:
+                self._pool = _get_pool()
+                self._conn = self._pool.getconn()
+                self._conn.autocommit = False
+            except Exception:
+                # Pool hỏng/cạn: mở kết nối trực tiếp dự phòng (an toàn, chỉ chậm hơn)
+                self._pool = None
+                self._conn = psycopg2.connect(_SUPABASE_URL)
+                self._conn.autocommit = False
+            self._closed = False
 
         def cursor(self):
             return _PGCursor(self._conn.cursor(cursor_factory=DictCursor))
@@ -115,13 +151,34 @@ if USE_POSTGRES:
             self._conn.rollback()
 
         def close(self):
-            self._conn.close()
+            # "Đóng" = dọn giao dịch dở và trả kết nối về pool (không đóng thật).
+            if self._closed:
+                return
+            self._closed = True
+            broken = False
+            try:
+                self._conn.rollback()
+            except Exception:
+                broken = True
+            if self._pool is None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                return
+            try:
+                self._pool.putconn(self._conn, close=broken)
+            except Exception:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
 
     # Lỗi trùng khóa của Postgres — để code cũ bắt được như sqlite3.IntegrityError
     IntegrityError = psycopg2.IntegrityError
 
     def get_conn():
-        return _PGConnection(_SUPABASE_URL)
+        return _PGConnection()
 
 else:
     IntegrityError = sqlite3.IntegrityError
