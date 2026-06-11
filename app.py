@@ -46,6 +46,45 @@ st.set_page_config(
 
 init_db()
 
+def _bootstrap_admin():
+    _pw = None
+    try:
+        if "INVESTOR_ADMIN_PASSWORD" in st.secrets:
+            _pw = st.secrets["INVESTOR_ADMIN_PASSWORD"]
+    except Exception:
+        pass
+    if not _pw:
+        _pw = os.environ.get("INVESTOR_ADMIN_PASSWORD")
+    if _pw:
+        try:
+            admin_ensure_admin_user(_pw)
+        except Exception:
+            pass
+
+
+_bootstrap_admin()
+
+
+def _bootstrap_admin():
+    """Create/reset the admin account from INVESTOR_ADMIN_PASSWORD (secret or env).
+    Runs on every cold start; safe no-op if the secret is not configured."""
+    _pw = None
+    try:
+        if "INVESTOR_ADMIN_PASSWORD" in st.secrets:
+            _pw = st.secrets["INVESTOR_ADMIN_PASSWORD"]
+    except Exception:
+        pass
+    if not _pw:
+        _pw = os.environ.get("INVESTOR_ADMIN_PASSWORD")
+    if _pw:
+        try:
+            admin_ensure_admin_user(_pw)
+        except Exception:
+            pass
+
+
+_bootstrap_admin()
+
 # ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
 
 st.markdown("""
