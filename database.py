@@ -94,11 +94,47 @@ if USE_POSTGRES:
         def close(self):
             self._cur.close()
 
+    # ── Connection pool: tái sử dụng kết nối để giảm độ trễ tới Supabase ──
+    # Mỗi lần mở kết nối mới tới Supabase (Singapore) tốn ~100-300ms cho việc
+    # bắt tay TCP/TLS/xác thực. Pool giữ sẵn vài kết nối "ấm" và tái sử dụng,
+    # nên mỗi truy vấn nhanh hơn nhiều. Keepalives giữ kết nối khỏi bị rớt.
+    from psycopg2 import pool as _pg_pool_mod
+
+    def _new_pool():
+        return _pg_pool_mod.ThreadedConnectionPool(
+            1, 8, _SUPABASE_URL,
+            connect_timeout=10,
+            keepalives=1, keepalives_idle=30,
+            keepalives_interval=10, keepalives_count=5,
+        )
+
+    # Cache pool qua Streamlit (tạo 1 lần, sống xuyên các lần rerun).
+    # Nếu không có Streamlit (chạy script thuần) thì dùng singleton thường.
+    try:
+        import streamlit as _st_cache
+        _get_pool = _st_cache.cache_resource(_new_pool, show_spinner=False)
+    except Exception:
+        _PG_POOL_SINGLETON = None
+
+        def _get_pool():
+            global _PG_POOL_SINGLETON
+            if _PG_POOL_SINGLETON is None:
+                _PG_POOL_SINGLETON = _new_pool()
+            return _PG_POOL_SINGLETON
+
     class _PGConnection:
-        """Connection bọc psycopg2 để hành xử giống sqlite3.Connection."""
-        def __init__(self, dsn):
-            self._conn = psycopg2.connect(dsn)
-            self._conn.autocommit = False
+        """Connection bọc psycopg2 (mượn từ pool) để hành xử giống sqlite3.Connection."""
+        def __init__(self):
+            try:
+                self._pool = _get_pool()
+                self._conn = self._pool.getconn()
+                self._conn.autocommit = False
+            except Exception:
+                # Pool hỏng/cạn: mở kết nối trực tiếp dự phòng (an toàn, chỉ chậm hơn)
+                self._pool = None
+                self._conn = psycopg2.connect(_SUPABASE_URL)
+                self._conn.autocommit = False
+            self._closed = False
 
         def cursor(self):
             return _PGCursor(self._conn.cursor(cursor_factory=DictCursor))
@@ -115,13 +151,34 @@ if USE_POSTGRES:
             self._conn.rollback()
 
         def close(self):
-            self._conn.close()
+            # "Đóng" = dọn giao dịch dở và trả kết nối về pool (không đóng thật).
+            if self._closed:
+                return
+            self._closed = True
+            broken = False
+            try:
+                self._conn.rollback()
+            except Exception:
+                broken = True
+            if self._pool is None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                return
+            try:
+                self._pool.putconn(self._conn, close=broken)
+            except Exception:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
 
     # Lỗi trùng khóa của Postgres — để code cũ bắt được như sqlite3.IntegrityError
     IntegrityError = psycopg2.IntegrityError
 
     def get_conn():
-        return _PGConnection(_SUPABASE_URL)
+        return _PGConnection()
 
 else:
     IntegrityError = sqlite3.IntegrityError
@@ -246,6 +303,22 @@ def init_db():
 
 # ─── AUTH ──────────────────────────────────────────────────────────────────────
 
+def _notify_admin_async(event_type, username, email=None, extra=None):
+    """Gửi email thông báo cho admin ở luồng nền (daemon thread) để KHÔNG làm
+    chậm thao tác của user và KHÔNG bao giờ làm crash app nếu email lỗi."""
+    def _run():
+        try:
+            import integrations
+            integrations.send_admin_notification(event_type, username, email=email, extra=extra)
+        except Exception:
+            pass
+    try:
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
 def register_user(username, email, password):
     conn = get_conn()
     try:
@@ -255,6 +328,7 @@ def register_user(username, email, password):
             (username.strip().lower(), email.strip().lower(), pw_hash)
         )
         conn.commit()
+        _notify_admin_async("signup", username.strip().lower(), email=email.strip().lower())
         return True, "ok"
     except IntegrityError as e:
         try:
@@ -301,7 +375,18 @@ def upgrade_user_plan(user_id, plan="pro"):
     conn = get_conn()
     conn.execute("UPDATE users SET plan=? WHERE id=?", (plan, user_id))
     conn.commit()
+    # Lấy thông tin user để thông báo cho admin (chỉ khi nâng lên pro)
+    info = None
+    if plan == "pro":
+        try:
+            info = conn.execute(
+                "SELECT username, email FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+        except Exception:
+            info = None
     conn.close()
+    if plan == "pro" and info:
+        _notify_admin_async("upgrade", info["username"], email=info["email"])
 
 
 # ─── JOURNAL ───────────────────────────────────────────────────────────────────

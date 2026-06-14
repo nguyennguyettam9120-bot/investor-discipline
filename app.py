@@ -34,6 +34,19 @@ from content import (
     DAILY_CHALLENGES, LIQUIDITY_CHECKLIST
 )
 
+# ── Nâng cấp regime + tấm gương + lỗi thực thi ──
+from regime_engine import (compute_regime, regime_rationale, regime_color,
+                           REGIME_SIGNALS, analyze_deterioration, deterioration_action,
+                           DETERIORATION_INFO, get_signals, MARKET_LABELS, MARKETS)
+from regime_store import save_regime_v2, get_regime_v2_latest, get_regime_v2_history
+from bias_engine import (BIAS_META, bias_color, biases_from_evening,
+                         biases_from_ai_coach, build_profile)
+from bias_store import log_biases, get_bias_events, get_evening_routines
+from execution_errors import EXECUTION_LESSON, EXECUTION_CHECKLIST
+from regime_training import TRAINING_BY_MARKET, REGIME_TRANSITIONS
+from quiz_bank import QUIZ_BANK
+LESSONS.update(EXECUTION_LESSON)  # thêm 'Bài 12. Lỗi thực thi'
+
 # ─── APP CONFIG ────────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -45,6 +58,45 @@ st.set_page_config(
 )
 
 init_db()
+
+def _bootstrap_admin():
+    _pw = None
+    try:
+        if "INVESTOR_ADMIN_PASSWORD" in st.secrets:
+            _pw = st.secrets["INVESTOR_ADMIN_PASSWORD"]
+    except Exception:
+        pass
+    if not _pw:
+        _pw = os.environ.get("INVESTOR_ADMIN_PASSWORD")
+    if _pw:
+        try:
+            admin_ensure_admin_user(_pw)
+        except Exception:
+            pass
+
+
+_bootstrap_admin()
+
+
+def _bootstrap_admin():
+    """Create/reset the admin account from INVESTOR_ADMIN_PASSWORD (secret or env).
+    Runs on every cold start; safe no-op if the secret is not configured."""
+    _pw = None
+    try:
+        if "INVESTOR_ADMIN_PASSWORD" in st.secrets:
+            _pw = st.secrets["INVESTOR_ADMIN_PASSWORD"]
+    except Exception:
+        pass
+    if not _pw:
+        _pw = os.environ.get("INVESTOR_ADMIN_PASSWORD")
+    if _pw:
+        try:
+            admin_ensure_admin_user(_pw)
+        except Exception:
+            pass
+
+
+_bootstrap_admin()
 
 # ─── CUSTOM CSS ────────────────────────────────────────────────────────────────
 
@@ -163,7 +215,7 @@ def show_upgrade_cta():
                     ("Daily Challenge", "✅", "✅"),
                     ("Bài học (8 chủ đề)", "✅", "✅"),
                     ("Historical scenarios", "6 / 14", "✅ Tất cả 14"),
-                    ("Quiz topics", "3 / 7", "✅ Tất cả 7"),
+                    ("Quiz topics", "3 / 6", "✅ Tất cả 6"),
                     ("Decision challenges", "3 / 7", "✅ Tất cả 7"),
                     ("Decision journal", "20 entries", "✅ Không giới hạn"),
                     ("🤖 AI Coach", "❌", "✅ 20 lần/tháng"),
@@ -178,7 +230,7 @@ def show_upgrade_cta():
                     ("Daily Challenge", "✅", "✅"),
                     ("Lessons (8 topics)", "✅", "✅"),
                     ("Historical scenarios", "6 / 14", "✅ All 14"),
-                    ("Quiz topics", "3 / 7", "✅ All 7"),
+                    ("Quiz topics", "3 / 6", "✅ All 6"),
                     ("Decision challenges", "3 / 7", "✅ All 7"),
                     ("Decision journal", "20 entries", "✅ Unlimited"),
                     ("🤖 AI Coach", "❌", "✅ 20x/month"),
@@ -666,59 +718,73 @@ def show_sidebar():
         section = st.selectbox(
             t("Nhóm", "Module"),
             [
-                t("📚 Học tập", "📚 Learn"),
-                t("🧪 Thực hành", "🧪 Practice"),
-                t("🔍 Phân tích", "🔍 Analyze"),
-                t("📈 Tiến độ", "📈 Progress"),
+                t("🚀 Bắt đầu", "🚀 Start"),
+                t("📡 Thị trường thời gian thực", "📡 Live Market"),
+                t("📚 Học & Luyện tập", "📚 Learn & Practice"),
+                t("🪞 Hồ sơ & Tiến độ", "🪞 You & Progress"),
+                t("👥 Cộng đồng", "👥 Community"),
                 t("⚙️ Tài khoản", "⚙️ Account"),
             ]
         )
 
-        if section in [t("📚 Học tập", "📚 Learn"), "📚 Học tập", "📚 Learn"]:
+        # 🚀 Bắt đầu — định hướng, làm quen
+        if section in [t("🚀 Bắt đầu", "🚀 Start"), "🚀 Bắt đầu", "🚀 Start"]:
             menu_items = [
                 t("Bắt đầu từ đây", "Start Here"),
+                t("Vì sao cần app này?", "Why This App?"),
+            ]
+        # 📡 Thị trường thời gian thực — bám theo thị trường & quyết định THẬT hôm nay
+        elif section in [t("📡 Thị trường thời gian thực", "📡 Live Market"),
+                         "📡 Thị trường thời gian thực", "📡 Live Market"]:
+            menu_items = [
+                t("📡 Regime Radar", "📡 Regime Radar"),
+                t("📰 Góc thị trường", "📰 Market Corner"),
                 t("⚡ Daily Challenge", "⚡ Daily Challenge"),
                 t("🌅 Routine sáng", "🌅 Morning Routine"),
                 t("🌙 Routine tối", "🌙 Evening Routine"),
-                t("📰 Góc thị trường", "📰 Market Corner"),
+                t("🤖 AI Coach", "🤖 AI Coach"),
+                t("📊 Portfolio Risk", "📊 Portfolio Risk"),
+            ]
+        # 📚 Học & Luyện tập — học từ quá khứ, không phụ thuộc dữ liệu thời gian thực
+        elif section in [t("📚 Học & Luyện tập", "📚 Learn & Practice"),
+                         "📚 Học & Luyện tập", "📚 Learn & Practice"]:
+            menu_items = [
                 t("Bài học", "Lessons"),
                 t("Market Regime Training", "Market Regime Training"),
                 t("Regime Taxonomy", "Regime Taxonomy"),
-                t("Vì sao cần app này?", "Why This App?"),
-            ]
-        elif section in [t("🧪 Thực hành", "🧪 Practice"), "🧪 Thực hành", "🧪 Practice"]:
-            menu_items = [
                 "Quiz",
+                t("🧰 Lỗi thực thi", "🧰 Execution Errors"),
                 t("Checklist trước khi mua", "Pre-Buy Checklist"),
                 t("🎣 Bạn có là thanh khoản?", "🎣 Are You the Liquidity?"),
-                t("Decision Simulator", "Decision Simulator"),
                 t("Historical Simulator", "Historical Simulator"),
+                t("Decision Simulator", "Decision Simulator"),
                 t("Investment Challenge", "Investment Challenge"),
                 t("Post-Mortem Trainer", "Post-Mortem Trainer"),
             ]
-        elif section in [t("🔍 Phân tích", "🔍 Analyze"), "🔍 Phân tích", "🔍 Analyze"]:
+        # 🪞 Hồ sơ & Tiến độ — soi chính bạn + theo dõi tiến bộ
+        elif section in [t("🪞 Hồ sơ & Tiến độ", "🪞 You & Progress"),
+                         "🪞 Hồ sơ & Tiến độ", "🪞 You & Progress"]:
             menu_items = [
-                t("🤖 AI Coach", "🤖 AI Coach"),
-                t("📡 Regime Radar", "📡 Regime Radar"),
-                t("📊 Portfolio Risk", "📊 Portfolio Risk"),
+                t("🪞 Tấm gương", "🪞 Mirror"),
                 t("Behavior Diagnosis", "Behavior Diagnosis"),
                 t("Bias Engine", "Bias Engine"),
+                t("Nhật ký quyết định", "Decision Journal"),
+                t("Điểm kỷ luật", "Discipline Score"),
+                t("Progress Dashboard", "Progress Dashboard"),
+                t("Mastery Score", "Mastery Score"),
                 t("Adaptive Curriculum", "Adaptive Curriculum"),
                 t("Learning Forecast", "Learning Forecast"),
-            ]
-        elif section in [t("📈 Tiến độ", "📈 Progress"), "📈 Tiến độ", "📈 Progress"]:
-            menu_items = [
-                t("Progress Dashboard", "Progress Dashboard"),
-                t("🏆 Leaderboard", "🏆 Leaderboard"),
-                t("👥 Cộng đồng", "👥 Community"),
-                t("Mastery Score", "Mastery Score"),
                 t("Learning Memory", "Learning Memory"),
                 t("Learning Trend", "Learning Trend"),
                 t("Scenario Coverage", "Scenario Coverage"),
                 t("Historical Dashboard", "Historical Dashboard"),
                 t("Gamification", "Gamification"),
-                t("Nhật ký quyết định", "Decision Journal"),
-                t("Điểm kỷ luật", "Discipline Score"),
+            ]
+        # 👥 Cộng đồng
+        elif section in [t("👥 Cộng đồng", "👥 Community"), "👥 Cộng đồng", "👥 Community"]:
+            menu_items = [
+                t("👥 Cộng đồng", "👥 Community"),
+                t("🏆 Leaderboard", "🏆 Leaderboard"),
             ]
         else:
             menu_items = [
@@ -767,39 +833,45 @@ def page_start_here():
     st.markdown(t("""
 App này **không** được thiết kế để giúp bạn kiếm tiền nhanh.
 
-Mục tiêu chính là giúp bạn:
+Triết lý: **phòng thủ trước rồi tấn công sau.** Mục tiêu là giúp bạn:
 
 - Tránh FOMO và all-in
-- Nhận diện thị trường xấu
+- Nhận diện khi thị trường xấu (Risk-off) — cả **Việt Nam và Mỹ**
 - Giảm quyết định cảm tính
-- Luyện tư duy Risk First
+- Soi và sửa chính những lỗi bạn lặp lại
 
 ### Nên dùng theo thứ tự:
 
-1. **Bài học** → nền tảng tư duy
-2. **Market Regime Training** → học phân loại Risk-on / Mixed / Risk-off
-3. **Historical Simulator** → luyện với thị trường quá khứ
-4. **Quiz** → kiểm tra hiểu bài
-5. **Investment Challenge** → luyện quy trình đầy đủ
-6. **Progress Dashboard** → theo dõi tiến bộ tổng thể
+1. **Bài học** → nền tảng tư duy (Risk / Regime / Evidence / Governance + Bài 12: Lỗi thực thi)
+2. **Vì sao cần app này?** → hiểu triết lý khác biệt
+3. **Market Regime Training** → học phân loại Risk-on / Mixed / Risk-off cho **VN và US**, kèm các bước chuyển trạng thái
+4. **Quiz** → 6 nhóm câu hỏi thực chiến; trả lời sai sẽ ghi bias vào Tấm gương
+5. **🧰 Lỗi thực thi** → tự soi các lỗi hành động khiến bạn thua dù nhận định đúng
+6. **AI Coach + Routine** → ghi lại quyết định thật của bạn
+7. **🪞 Tấm gương** → xem bias nào bạn lặp lại nhiều nhất, có đang cải thiện không
+8. **Regime Radar** → theo dõi regime VN/US mỗi tuần + cảnh báo "đang xấu đi"
+9. **Progress Dashboard** → theo dõi tiến bộ tổng thể
 """, """
 This app is **not** designed to help you make money fast.
 
-Its main goal is to help you:
+The philosophy: **defend first, then attack.** Its goal is to help you:
 
 - Avoid FOMO and all-in positions
-- Recognize bad market regimes
+- Recognize bad regimes (Risk-off) — in **both Vietnam and the US**
 - Reduce emotional decisions
-- Build Risk First thinking
+- See and fix the mistakes you personally repeat
 
 ### Recommended order:
 
-1. **Lessons** → build the mindset foundation
-2. **Market Regime Training** → learn Risk-on / Mixed / Risk-off
-3. **Historical Simulator** → practice with historical markets
-4. **Quiz** → test your understanding
-5. **Investment Challenge** → practice the full process
-6. **Progress Dashboard** → track overall progress
+1. **Lessons** → build the mindset (Risk / Regime / Evidence / Governance + Lesson 12: Execution errors)
+2. **Why This App?** → understand the differentiated philosophy
+3. **Market Regime Training** → learn Risk-on / Mixed / Risk-off for **VN and US**, with state transitions
+4. **Quiz** → 6 real-world topics; wrong answers feed your Mirror
+5. **🧰 Execution Errors** → self-check the action errors that lose money despite a correct thesis
+6. **AI Coach + Routines** → log your real decisions
+7. **🪞 Personal Mirror** → see which biases you repeat most, and whether you're improving
+8. **Regime Radar** → track VN/US regime weekly + the "deteriorating" early warning
+9. **Progress Dashboard** → track overall progress
 """))
 
 
@@ -812,44 +884,100 @@ def page_lessons():
 
 def page_quiz():
     st.header("📝 Quiz")
+    st.caption(t(
+        "Mỗi câu có giải thích. Trả lời sai sẽ chỉ ra bias tương ứng và ghi vào 🪞 Tấm gương của bạn.",
+        "Each question is explained. Wrong answers flag the matching bias and feed your 🪞 Mirror."
+    ))
 
     user = st.session_state.user
     plan = get_user_plan(user["id"]) if user["id"] != -1 else "free"
     limits = FREEMIUM_LIMITS[plan]
+    lang = st.session_state.lang
 
-    all_topics = list(QUIZ.keys())
-    available_topics = all_topics[:limits["max_quiz_topics"]]
+    all_topics = list(QUIZ_BANK.keys())
+    max_topics = limits.get("max_quiz_topics", len(all_topics))
+    available_topics = all_topics[:max_topics]
 
     if len(available_topics) < len(all_topics):
         st.info(t(
-            f"Gói Free có {limits['max_quiz_topics']}/{len(all_topics)} chủ đề. ⭐ Nâng cấp Pro để mở khóa tất cả.",
-            f"Free plan includes {limits['max_quiz_topics']}/{len(all_topics)} topics. ⭐ Upgrade to Pro for all."
+            f"Gói Free có {len(available_topics)}/{len(all_topics)} chủ đề. ⭐ Nâng cấp Pro để mở khóa tất cả.",
+            f"Free plan includes {len(available_topics)}/{len(all_topics)} topics. ⭐ Upgrade to Pro for all."
         ))
 
-    topic = st.selectbox(t("Chọn chủ đề", "Select topic"), available_topics)
-    questions = QUIZ[topic]
+    topic = st.selectbox(t("Chọn chủ đề", "Select topic"), available_topics, key="quiz_topic")
+    questions = QUIZ_BANK[topic]
 
+    st.caption(t(f"{len(questions)} câu — trả lời hết rồi bấm Nộp bài.",
+                 f"{len(questions)} questions — answer all, then Submit."))
+
+    # ── Render câu hỏi ──
     for i, item in enumerate(questions):
-        st.markdown(f"**Q{i+1}:** {item[f'q_{st.session_state.lang}']}")
-        options = item[f"options_{st.session_state.lang}"]
-        answer = item[f"answer_{st.session_state.lang}"]
-        bias_map = item.get(f"bias_map_{st.session_state.lang}", {})
+        st.markdown(f"**Q{i+1}.** {item[f'q_{lang}']}")
+        st.radio("", item[f"options_{lang}"], key=f"quiz_{topic}_{i}",
+                 label_visibility="collapsed", index=None)
+        st.markdown("")
 
-        key = f"quiz_{topic}_{i}"
-        choice = st.radio("", options, key=key, label_visibility="collapsed")
-
-        if st.button(t("Kiểm tra", "Check"), key=f"check_{topic}_{i}"):
-            if choice == answer:
-                st.success(t("✅ Đúng! Tư duy phòng thủ tốt.", "✅ Correct! Sound defensive thinking."))
-            else:
-                st.error(t(f"❌ Sai. Đáp án: **{answer}**", f"❌ Wrong. Answer: **{answer}**"))
-                bias = bias_map.get(choice)
-                if bias and bias in BIAS_EXPLANATIONS:
-                    st.warning(BIAS_EXPLANATIONS[bias][st.session_state.lang])
-
+    # ── Nộp bài + chấm ──
+    if st.button(t("✅ Nộp bài", "✅ Submit"), type="primary", key=f"submit_{topic}"):
+        correct_n = 0
+        wrong_biases = []
+        unanswered = 0
         st.divider()
+        st.subheader(t("📊 Kết quả", "📊 Results"))
+
+        for i, item in enumerate(questions):
+            answer = item[f"answer_{lang}"]
+            choice = st.session_state.get(f"quiz_{topic}_{i}")
+            ok = (choice == answer)
+            if choice is None:
+                unanswered += 1
+            if ok:
+                correct_n += 1
+            icon = "✅" if ok else "❌"
+            st.markdown(f"{icon} **Q{i+1}.** {item[f'q_{lang}']}")
+            if not ok:
+                if choice is None:
+                    st.caption(t("(Chưa trả lời)", "(Not answered)"))
+                st.markdown(t(f"Đáp án đúng: **{answer}**", f"Correct answer: **{answer}**"))
+                bias = item.get(f"bias_map_{lang}", {}).get(choice)
+                if bias:
+                    wrong_biases.append(bias)
+                    note = None
+                    be = BIAS_EXPLANATIONS.get(bias)
+                    if isinstance(be, dict):
+                        note = be.get(lang)
+                    if not note and bias in BIAS_META:
+                        note = BIAS_META[bias][f"fix_{lang}"]
+                    if note:
+                        st.warning(f"⚠️ {note}")
+            st.caption("💡 " + item[f"explain_{lang}"])
+            st.divider()
+
+        # ── Điểm tổng ──
+        total = len(questions)
+        pct = round(100 * correct_n / total) if total else 0
+        c1, c2 = st.columns([1, 2])
+        c1.metric(t("Điểm", "Score"), f"{correct_n}/{total}", f"{pct}%")
+        with c2:
+            if pct >= 80:
+                st.success(t("🟢 Vững! Tư duy phòng thủ tốt.", "🟢 Solid! Sound defensive thinking."))
+            elif pct >= 50:
+                st.info(t("🟡 Khá. Xem lại các câu sai để chắc nền tảng.",
+                          "🟡 Decent. Review the misses to firm up the basics."))
+            else:
+                st.warning(t("🟠 Cần ôn lại. Đọc kỹ giải thích từng câu phía trên.",
+                             "🟠 Needs review. Read each explanation above carefully."))
+
+        # ── Ghi bias sai vào Tấm gương ──
+        if user["id"] != -1 and wrong_biases:
+            log_biases(user["id"], "quiz", wrong_biases, detail=topic)
+            st.caption(t(
+                "Các bias từ câu trả lời sai đã được ghi vào 🪞 Tấm gương cá nhân.",
+                "Biases from your wrong answers were recorded in your 🪞 Personal Mirror."
+            ))
 
     if len(available_topics) < len(all_topics):
+        st.divider()
         show_upgrade_cta()
 
 
@@ -953,27 +1081,90 @@ def page_decision_simulator():
 
 
 def page_market_regime():
-    st.header(t("📡 Market Regime Training", "📡 Market Regime Training"))
+    lang = st.session_state.lang
 
-    case_names = [c["name"] for c in REGIME_CASES]
-    selected = st.selectbox(t("Chọn tình huống", "Select scenario"), case_names)
-    case = next(c for c in REGIME_CASES if c["name"] == selected)
+    mk_label = {m: MARKET_LABELS[m]['name_' + lang] for m in MARKETS}
+    market = st.radio(
+        t("Thị trường", "Market"), MARKETS,
+        format_func=lambda m: mk_label[m], horizontal=True, key="train_market"
+    )
 
-    st.subheader(case["name"])
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("VIX", case["vix"])
-    col2.metric("S&P 500 vs MA200", case["sp500_ma200"])
-    col3.metric("Breadth", case["breadth"])
-    col4.metric("Credit", case["credit"])
+    st.header(f"📡 {t('Luyện phân loại Regime', 'Regime Classification Training')} — {mk_label[market]}")
+    st.caption(t(
+        "Đáp án chấm bằng CHÍNH rubric của Regime Radar — luyện đúng logic thật, không phải đáp án rời rạc.",
+        "Answers are graded by the SAME rubric as Regime Radar — you train the real logic, not disconnected answers."
+    ))
 
-    answer = st.radio(t("Bạn phân loại regime này là gì?", "How do you classify this regime?"), ["Risk-on", "Mixed", "Risk-off"])
+    cases = TRAINING_BY_MARKET[market]
+    names = [c[f"name_{lang}"] for c in cases]
+    sel = st.selectbox(t("Chọn tình huống", "Select scenario"), names, key=f"train_sel_{market}")
+    case = cases[names.index(sel)]
+    sigs = get_signals(market)
 
-    if st.button(t("Kiểm tra", "Check"), type="primary"):
-        if answer == case["correct"]:
-            st.success(t("✅ Đúng!", "✅ Correct!"))
+    # ── Hiển thị bộ tín hiệu của tình huống ──
+    st.subheader(case[f"name_{lang}"])
+    cols = st.columns(2)
+    for i, sig in enumerate(sigs):
+        val = case["signals"].get(sig["key"], "—")
+        if sig["type"] == "numeric":
+            try:
+                val = sig["fmt"](float(val))
+            except (TypeError, ValueError):
+                pass
+        cols[i % 2].metric(sig[f"label_{lang}"], val)
+
+    # ── Người dùng phân loại ──
+    answer = st.radio(
+        t("Bạn phân loại regime này là gì?", "How do you classify this regime?"),
+        ["Risk-on", "Mixed", "Risk-off"], key=f"train_ans_{market}"
+    )
+
+    if st.button(t("Kiểm tra", "Check"), type="primary", key=f"train_check_{market}"):
+        result = compute_regime(case["signals"], market)
+        correct = result["regime"]
+        rc = regime_color(correct)
+
+        if answer == correct:
+            st.success(t(f"✅ Đúng! Regime = **{correct}** ({result['onscore']}/100)",
+                         f"✅ Correct! Regime = **{correct}** ({result['onscore']}/100)"))
         else:
-            st.error(t(f"❌ Sai. Đáp án: **{case['correct']}**", f"❌ Wrong. Answer: **{case['correct']}**"))
-        st.info(case[f"explain_{st.session_state.lang}"])
+            st.error(t(f"❌ Chưa đúng. Đáp án: **{correct}** ({result['onscore']}/100)",
+                       f"❌ Not quite. Answer: **{correct}** ({result['onscore']}/100)"))
+
+        # Lý do theo rubric (cap/veto nếu có)
+        st.info("🧭 " + regime_rationale(result, lang))
+        # Ghi chú dạy học của tình huống
+        st.markdown(f"**{t('Bài học','Lesson')}:** {case[f'note_{lang}']}")
+
+        # Nếu có CAP/VETO → nêu rõ cơ chế
+        if result["vetoes"]:
+            st.warning(t(
+                "⚠️ Đây là trường hợp **VETO**: một trạng thái cực đoan ép thẳng Risk-off, bỏ qua điểm số.",
+                "⚠️ This is a **VETO** case: an extreme state forces Risk-off, overriding the score."
+            ))
+        elif result["caps"] and result["base_regime"] == "Risk-on":
+            st.warning(t(
+                "⚠️ Đây là trường hợp **CAP**: điểm đủ Risk-on nhưng một điều kiện then chốt chưa đạt nên chặn ở Mixed.",
+                "⚠️ This is a **CAP** case: the score reaches Risk-on but a key condition is unmet, capping it at Mixed."
+            ))
+
+    # ── Giải thích các bước chuyển trạng thái ──
+    st.divider()
+    with st.expander(t("🔄 Hiểu các bước chuyển trạng thái (Risk-on ↔ Mixed ↔ Risk-off)",
+                       "🔄 Understand the transitions (Risk-on ↔ Mixed ↔ Risk-off)"), expanded=False):
+        st.caption(t(
+            "Regime hiếm khi đổi đột ngột. Hiểu CÁI GÌ đẩy nó dịch chuyển giúp bạn phòng thủ trước.",
+            "Regime rarely flips abruptly. Knowing WHAT moves it helps you defend ahead of time."
+        ))
+        for tr in REGIME_TRANSITIONS:
+            col = tr["color"]
+            st.markdown(f"""
+<div style="background:{col}12; border-left:4px solid {col}; border-radius:0 8px 8px 0;
+padding:9px 13px; margin:7px 0;">
+  <div style="font-weight:700; color:{col}; font-size:14px;">{tr[f'title_{lang}']}</div>
+  <div style="font-size:13px; color:#CBD5E1; margin-top:3px;">{tr[f'trigger_{lang}']}</div>
+</div>
+""", unsafe_allow_html=True)
 
 
 def page_post_mortem():
@@ -2048,24 +2239,38 @@ Mà trở thành người:
 </div>''', unsafe_allow_html=True)
         with col_d2:
             st.markdown('''<div class="solution-box">
-📡 <strong>Regime Radar</strong><br>Mỗi tuần admin cập nhật: VN-Index đang ở regime nào, tại sao, và nên làm gì.
+📡 <strong>Regime Radar (VN & US)</strong><br>Mỗi tuần: thị trường đang ở regime nào, vì sao (rubric minh bạch từng tín hiệu), nên làm gì. Tách riêng VN và US.
 </div>''', unsafe_allow_html=True)
         with col_d3:
             st.markdown('''<div class="solution-box">
 📊 <strong>Portfolio Risk Checker</strong><br>Nhập danh mục đang nắm — app tính tổng rủi ro và cảnh báo concentrated bet ngay lập tức.
 </div>''', unsafe_allow_html=True)
 
+        col_d4, col_d5, col_d6 = st.columns(3)
+        with col_d4:
+            st.markdown('''<div class="solution-box">
+📉 <strong>Cảnh báo "đang xấu đi"</strong><br>Phát hiện regime suy yếu TRƯỚC khi đổi nhãn: điểm trượt dần, tín hiệu nào vừa gãy, còn mấy tuần tới Risk-off.
+</div>''', unsafe_allow_html=True)
+        with col_d5:
+            st.markdown('''<div class="solution-box">
+🪞 <strong>Tấm gương cá nhân</strong><br>Phản chiếu chính bạn: bias nào bạn lặp lại nhiều nhất, tháng này có khá hơn không. Dựng từ Routine, AI Coach, Quiz.
+</div>''', unsafe_allow_html=True)
+        with col_d6:
+            st.markdown('''<div class="solution-box">
+🧰 <strong>Lỗi thực thi</strong><br>Soi các lỗi hành động khiến bạn thua dù nhận định đúng: bình quân giá xuống, dời stop, overtrading, đu phím.
+</div>''', unsafe_allow_html=True)
+
         st.markdown("---")
         col5, col6, col7 = st.columns(3)
         with col5:
-            st.markdown('''<div class="stat-box"><div class="stat-num">11</div>
+            st.markdown('''<div class="stat-box"><div class="stat-num">12</div>
 <div class="stat-lbl">Bài học nền tảng</div></div>''', unsafe_allow_html=True)
         with col6:
             st.markdown('''<div class="stat-box"><div class="stat-num">17</div>
 <div class="stat-lbl">Historical scenarios (incl. VN)</div></div>''', unsafe_allow_html=True)
         with col7:
-            st.markdown('''<div class="stat-box"><div class="stat-num">29+</div>
-<div class="stat-lbl">Quiz questions thực chiến</div></div>''', unsafe_allow_html=True)
+            st.markdown('''<div class="stat-box"><div class="stat-num">35</div>
+<div class="stat-lbl">Quiz questions (6 nhóm)</div></div>''', unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("""
@@ -2153,24 +2358,38 @@ But to become the investor who:
 </div>''', unsafe_allow_html=True)
         with col_d2:
             st.markdown('''<div class="solution-box">
-📡 <strong>Regime Radar</strong><br>Updated weekly: what regime VN-Index is in, why, and what to do.
+📡 <strong>Regime Radar (VN & US)</strong><br>Weekly: which regime the market is in, why (a transparent per-signal rubric), what to do. VN and US separated.
 </div>''', unsafe_allow_html=True)
         with col_d3:
             st.markdown('''<div class="solution-box">
 📊 <strong>Portfolio Risk Checker</strong><br>Enter your holdings — app calculates total risk and warns about concentrated bets instantly.
 </div>''', unsafe_allow_html=True)
 
+        col_e4, col_e5, col_e6 = st.columns(3)
+        with col_e4:
+            st.markdown('''<div class="solution-box">
+📉 <strong>"Deteriorating" alert</strong><br>Catches a weakening regime BEFORE the label flips: drifting score, which signal just broke, weeks until Risk-off.
+</div>''', unsafe_allow_html=True)
+        with col_e5:
+            st.markdown('''<div class="solution-box">
+🪞 <strong>Personal Mirror</strong><br>Reflects you: which biases you repeat most, and whether this month beats last. Built from Routines, AI Coach, Quiz.
+</div>''', unsafe_allow_html=True)
+        with col_e6:
+            st.markdown('''<div class="solution-box">
+🧰 <strong>Execution Errors</strong><br>Surfaces the action errors that lose money despite a correct thesis: averaging down, moving stops, overtrading, chasing tips.
+</div>''', unsafe_allow_html=True)
+
         st.markdown("---")
         col5, col6, col7 = st.columns(3)
         with col5:
-            st.markdown('''<div class="stat-box"><div class="stat-num">11</div>
+            st.markdown('''<div class="stat-box"><div class="stat-num">12</div>
 <div class="stat-lbl">Core lessons</div></div>''', unsafe_allow_html=True)
         with col6:
             st.markdown('''<div class="stat-box"><div class="stat-num">17</div>
 <div class="stat-lbl">Historical scenarios (incl. VN)</div></div>''', unsafe_allow_html=True)
         with col7:
-            st.markdown('''<div class="stat-box"><div class="stat-num">29+</div>
-<div class="stat-lbl">Real-world quiz questions</div></div>''', unsafe_allow_html=True)
+            st.markdown('''<div class="stat-box"><div class="stat-num">35</div>
+<div class="stat-lbl">Quiz questions (6 topics)</div></div>''', unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("""
@@ -2373,6 +2592,8 @@ def main():
         t("🤖 AI Coach", "🤖 AI Coach"): page_ai_coach,
         t("📡 Regime Radar", "📡 Regime Radar"): page_regime_radar,
         t("📊 Portfolio Risk", "📊 Portfolio Risk"): page_portfolio_risk,
+        t("🪞 Tấm gương", "🪞 Mirror"): page_mirror,
+        t("🧰 Lỗi thực thi", "🧰 Execution Errors"): page_execution_check,
     }
 
     page_fn = routing.get(menu)
@@ -2487,6 +2708,10 @@ Keep analysis concise and practical."""
                 )
                 analysis = response.content[0].text
                 track_ai_usage(user["id"], "ai_coach")
+                # nuôi Tấm gương cá nhân
+                _bias_codes = biases_from_ai_coach(emotion=emotion, stop_loss=stop_loss,
+                                                   risk_pct=risk_pct, regime=regime)
+                log_biases(user["id"], "ai_coach", _bias_codes, detail=str(ticker or ""))
 
                 st.divider()
                 st.subheader(t("📋 Phân tích AI Coach", "📋 AI Coach Analysis"))
@@ -2519,123 +2744,559 @@ Keep analysis concise and practical."""
 
 # ─── REGIME RADAR ──────────────────────────────────────────────────────────────
 
-def page_regime_radar():
-    st.header(t("📡 Regime Radar — Tuần này", "📡 Regime Radar — This Week"))
+def _render_regime_scorecard(result):
+    """Scorecard minh bạch: badge regime, thanh điểm 0–100, bảng tín hiệu, lý do.
+    Tự thích ứng với mọi bộ tín hiệu trong REGIME_SIGNALS."""
+    lang = st.session_state.lang
+    onscore = result["onscore"]
+    regime = result["regime"]
+    rc = regime_color(regime)
 
-    user = st.session_state.user
-    plan = get_user_plan(user["id"]) if user["id"] != -1 else "free"
-
-    # Show latest radar to everyone (read-only for free)
-    latest = get_regime_radar_latest()
-
-    if latest:
-        # Regime color mapping
-        regime_colors = {"Risk-on": "#059669", "Mixed": "#D97706", "Risk-off": "#DC2626"}
-        rc = regime_colors.get(latest.get("regime_call", "Mixed"), "#D97706")
-
-        st.markdown(f"""
-<div style="background: rgba(29,78,216,0.08); border: 1px solid rgba(29,78,216,0.25);
-border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem;">
-<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-  <div>
-    <span style="font-size:13px; color:#94A3B8">📅 {latest.get("week_label","")}</span><br>
-    <span style="font-size:22px; font-weight:700; color:{rc}">
-      {latest.get("regime_call","—")}
-    </span>
+    st.markdown(f"""
+<div style="background: rgba(15,23,42,0.4); border: 1px solid {rc}55;
+border-radius: 14px; padding: 1.1rem 1.25rem; margin-bottom: 0.75rem;">
+  <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:10px; flex-wrap:wrap;">
+    <div>
+      <div style="font-size:12px; color:#94A3B8; letter-spacing:.4px;">{t("KẾT LUẬN REGIME","REGIME CALL")}</div>
+      <div style="font-size:30px; font-weight:800; color:{rc}; line-height:1.1;">{regime}</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:12px; color:#94A3B8;">Risk-on Score</div>
+      <div style="font-size:30px; font-weight:800; color:{rc}; line-height:1.1;">{onscore}<span style="font-size:15px;color:#64748B;">/100</span></div>
+    </div>
   </div>
-  <div style="text-align:right">
-    <span style="font-size:11px; color:#64748B">Cập nhật bởi Admin</span>
-  </div>
-</div>
 </div>
 """, unsafe_allow_html=True)
 
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("VIX", f"{latest.get('vix','—')}")
-        col2.metric("VN-Index vs MA200", latest.get("vn_vs_ma200", "—"))
-        col3.metric("Breadth", latest.get("breadth", "—"))
-        col4.metric("Credit/Lãi suất", latest.get("credit", "—"))
-        col5.metric("Margin", latest.get("margin_status", "—"))
+    st.markdown(f"""
+<div style="margin: 2px 0 14px 0;">
+  <div style="position:relative; height:16px; border-radius:8px;
+    background:linear-gradient(90deg,
+      #DC2626 0%, #DC2626 34%, #D97706 34%, #D97706 66%, #059669 66%, #059669 100%);">
+    <div style="position:absolute; left:calc({onscore}% - 2px); top:-5px;
+      width:4px; height:26px; background:#F8FAFC; border-radius:2px;
+      box-shadow:0 0 6px rgba(0,0,0,.6);"></div>
+  </div>
+  <div style="display:flex; justify-content:space-between; font-size:10.5px; color:#64748B; margin-top:3px;">
+    <span>0 · Risk-off</span><span>34</span><span>66</span><span>Risk-on · 100</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    rationale = regime_rationale(result, lang)
+    if result["vetoes"]:
+        st.error(rationale)
+    elif result["caps"] and result["base_regime"] == "Risk-on":
+        st.warning(rationale)
+    else:
+        st.info(rationale)
+
+    st.markdown(f"**{t('🔬 Bảng tín hiệu — cách điểm được tính', '🔬 Signal breakdown — how the score is built')}**")
+    rows_html = ""
+    for r in result["rows"]:
+        label = r[f"label_{lang}"]
+        hint = r[f"hint_{lang}"]
+        contrib = r["contribution"]
+        sign = "+" if contrib > 0 else ""
+        rows_html += f"""
+<tr style="border-bottom:1px solid rgba(148,163,184,.12);">
+  <td style="padding:7px 8px;">
+    <div style="font-weight:600; font-size:13.5px;">{label}</div>
+    <div style="font-size:11px; color:#64748B;">{hint}</div>
+  </td>
+  <td style="padding:7px 8px; text-align:center; font-size:13px; color:#CBD5E1;">{r['value']}</td>
+  <td style="padding:7px 8px; text-align:center;">
+    <span style="display:inline-block; min-width:34px; padding:2px 8px; border-radius:12px;
+      background:{r['color']}22; color:{r['color']}; font-weight:700; font-size:13px;">{r['score']:+d}</span>
+  </td>
+  <td style="padding:7px 8px; text-align:center; font-size:12px; color:#94A3B8;">×{r['weight']:g}</td>
+  <td style="padding:7px 8px; text-align:right; font-weight:700; font-size:13px; color:{r['color']};">{sign}{contrib:g}</td>
+</tr>"""
+
+    st.markdown(f"""
+<table style="width:100%; border-collapse:collapse; font-size:13px;">
+  <thead>
+    <tr style="color:#64748B; font-size:11px; text-transform:uppercase; letter-spacing:.3px;">
+      <th style="text-align:left; padding:4px 8px;">{t('Tín hiệu','Signal')}</th>
+      <th style="text-align:center; padding:4px 8px;">{t('Trạng thái','State')}</th>
+      <th style="text-align:center; padding:4px 8px;">{t('Điểm','Score')}</th>
+      <th style="text-align:center; padding:4px 8px;">{t('Trọng số','Weight')}</th>
+      <th style="text-align:right; padding:4px 8px;">{t('Đóng góp','Contrib.')}</th>
+    </tr>
+  </thead>
+  <tbody>{rows_html}</tbody>
+</table>
+""", unsafe_allow_html=True)
+
+    st.caption(t(
+        f"Tổng có trọng số: {result['weighted_sum']:g} / ±{result['max_abs']:g}  →  "
+        f"Risk-on Score = 50 + 50 × (tổng ÷ max) = {onscore}. "
+        "Ngưỡng: ≥66 Risk-on · 34–65 Mixed · ≤33 Risk-off.",
+        f"Weighted sum: {result['weighted_sum']:g} / ±{result['max_abs']:g}  →  "
+        f"Risk-on Score = 50 + 50 × (sum ÷ max) = {onscore}. "
+        "Thresholds: ≥66 Risk-on · 34–65 Mixed · ≤33 Risk-off."
+    ))
+
+
+def _render_deterioration(analysis, plan):
+    """Panel cảnh báo xu hướng regime. Headline cho mọi người (sự thật về rủi ro);
+    chi tiết tín hiệu gãy + dự phóng + kế hoạch giảm rủi ro = Pro."""
+    lang = st.session_state.lang
+    status = analysis["status"]
+    info = DETERIORATION_INFO[status]
+    color = info["color"]
+    label = info[f"label_{lang}"]
+    delta = analysis["delta"]
+    arrow = "▼" if delta < 0 else ("▲" if delta > 0 else "▬")
+
+    # Câu mô tả ngắn
+    if analysis["streak"] >= 2:
+        streak_txt = t(
+            f"Điểm giảm {analysis['streak']} tuần liên tiếp (mất {analysis['total_drop']} điểm).",
+            f"Score down {analysis['streak']} weeks straight (lost {analysis['total_drop']} points)."
+        )
+    elif delta < 0:
+        streak_txt = t(f"Điểm vừa giảm {abs(delta)} so với tuần trước.",
+                       f"Score just dropped {abs(delta)} vs last week.")
+    elif delta > 0:
+        streak_txt = t(f"Điểm vừa tăng {delta} so với tuần trước.",
+                       f"Score just rose {delta} vs last week.")
+    else:
+        streak_txt = t("Điểm đi ngang.", "Score flat.")
+
+    st.markdown(f"""
+<div style="background:{color}14; border:1px solid {color}55; border-radius:12px;
+padding:0.9rem 1.1rem; margin:0.25rem 0 0.5rem 0;">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+    <div>
+      <span style="font-size:11px; color:#94A3B8; letter-spacing:.4px;">{t("XU HƯỚNG REGIME","REGIME TREND")}</span><br>
+      <span style="font-size:20px; font-weight:800; color:{color};">{label}</span>
+    </div>
+    <div style="text-align:right;">
+      <span style="font-size:22px; font-weight:800; color:{color};">{arrow} {delta:+d}</span><br>
+      <span style="font-size:11px; color:#64748B;">{t("so với tuần trước","vs last week")}</span>
+    </div>
+  </div>
+  <div style="font-size:12.5px; color:#CBD5E1; margin-top:6px;">{streak_txt}</div>
+</div>
+""", unsafe_allow_html=True)
+
+    if plan != "pro":
+        st.caption(t(
+            "⭐ Pro: xem tín hiệu nào đang gãy, dự phóng số tuần tới Risk-off, và kế hoạch giảm rủi ro theo cấp độ.",
+            "⭐ Pro: see which signals are breaking, weeks-to-Risk-off projection, and a graduated de-risk plan."
+        ))
+        return
+
+    # ── Pro: tín hiệu vừa gãy ──
+    if analysis["dropped"]:
+        st.markdown(f"**{t('Tín hiệu vừa rớt điểm tuần này','Signals that dropped this week')}**")
+        items = ""
+        for d in analysis["dropped"]:
+            lbl = d[f"label_{lang}"]
+            items += (f"<li style='margin:3px 0;'><strong>{lbl}</strong>: "
+                      f"<span style='color:#94A3B8'>{d['from']} → {d['to']}</span> "
+                      f"<span style='color:#DC2626;font-weight:700'>({d['delta']:+d})</span></li>")
+        st.markdown(f"<ul style='margin:4px 0 8px 0; padding-left:18px; font-size:13px;'>{items}</ul>",
+                    unsafe_allow_html=True)
+
+    # ── Dự phóng ──
+    w = analysis["weeks_to_riskoff"]
+    if w is not None:
+        proj = (t(f"Theo tốc độ giảm gần đây (~{abs(analysis['avg_change']):g} điểm/tuần), "
+                  f"còn ~**{w} tuần** nữa chạm ngưỡng Risk-off (34) nếu không cải thiện.",
+                  f"At the recent pace (~{abs(analysis['avg_change']):g} pts/week), "
+                  f"~**{w} weeks** to hit the Risk-off threshold (34) if it doesn't improve."))
+        st.caption(proj)
+
+    # ── Kế hoạch giảm rủi ro theo cấp độ ──
+    action = deterioration_action(status, lang)
+    if status in ("CRITICAL", "RISK_OFF"):
+        st.error(f"🛡️ {action}")
+    elif status == "DETERIORATING":
+        st.warning(f"🛡️ {action}")
+    elif status == "SOFTENING":
+        st.info(f"🛡️ {action}")
+    else:
+        st.success(f"🛡️ {action}")
+
+
+def page_regime_radar():
+    user = st.session_state.user
+    plan = get_user_plan(user["id"]) if user["id"] != -1 else "free"
+    lang = st.session_state.lang
+
+    # ── Bộ chọn thị trường VN / US ──
+    mk_label = {m: MARKET_LABELS[m]['name_' + lang] for m in MARKETS}
+    market = st.radio(
+        t("Thị trường", "Market"), MARKETS,
+        format_func=lambda m: mk_label[m], horizontal=True, key="regime_market"
+    )
+
+    st.header(f"📡 Regime Radar — {mk_label[market]}")
+
+    latest = get_regime_v2_latest(market)
+
+    if latest and latest.get("signals"):
+        st.markdown(f"""
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+  <span style="font-size:13px; color:#94A3B8;">📅 {latest.get("week_label","")}</span>
+  <span style="font-size:11px; color:#64748B;">{t("rubric công khai","public rubric")}</span>
+</div>
+""", unsafe_allow_html=True)
+
+        result = compute_regime(latest["signals"], market)
+        _render_regime_scorecard(result)
+
+        # #3 — Cảnh báo xu hướng "đang xấu đi"
+        _hist = get_regime_v2_history(8, market)
+        _analysis = analyze_deterioration(list(reversed(_hist)), market)
+        if _analysis:
+            st.divider()
+            st.subheader(t("📉 Xu hướng regime", "📉 Regime Trend"))
+            _render_deterioration(_analysis, plan)
+
+        saved_call = latest.get("regime_call")
+        if saved_call and saved_call != result["regime"]:
+            st.caption(t(
+                f"⚠️ Admin ghi đè thủ công: **{saved_call}** (rubric tính ra {result['regime']}).",
+                f"⚠️ Manual admin override: **{saved_call}** (rubric computed {result['regime']})."
+            ))
 
         st.divider()
         st.subheader(t("📝 Nhận xét tuần này", "📝 Weekly Commentary"))
-        note = latest.get(f"note_{st.session_state.lang}", "")
+        note = latest.get(f"note_{lang}", "")
         if note:
             st.markdown(note)
         else:
             st.info(t("Admin chưa thêm nhận xét cho tuần này.", "Admin hasn't added commentary for this week yet."))
     else:
         st.info(t(
-            "📡 Regime Radar chưa có dữ liệu. Admin sẽ cập nhật mỗi đầu tuần.",
-            "📡 Regime Radar has no data yet. Admin updates every start of week."
+            f"📡 Regime Radar ({mk_label[market]}) chưa có dữ liệu. Admin sẽ cập nhật mỗi đầu tuần.",
+            f"📡 Regime Radar ({mk_label[market]}) has no data yet. Admin updates every start of week."
         ))
 
-    # History chart - Pro only
+    # ── Lịch sử Risk-on Score (Pro) ──
     if plan == "pro":
-        history = get_regime_radar_history(12)
+        history = get_regime_v2_history(12, market)
         if len(history) >= 2:
             st.divider()
-            st.subheader(t("📈 Lịch sử Regime (12 tuần)", "📈 Regime History (12 weeks)"))
+            st.subheader(t("📈 Lịch sử Risk-on Score (12 tuần)", "📈 Risk-on Score History (12 weeks)"))
             df_h = pd.DataFrame(history[::-1])
-            regime_num = {"Risk-on": 3, "Mixed": 2, "Risk-off": 1}
-            df_h["regime_num"] = df_h["regime_call"].map(regime_num)
-            df_h["vix"] = pd.to_numeric(df_h["vix"], errors="coerce")
-
+            df_h["onscore"] = pd.to_numeric(df_h["onscore"], errors="coerce")
             fig = go.Figure()
-            color_map = {3: "#059669", 2: "#D97706", 1: "#DC2626"}
-            for _, row in df_h.iterrows():
-                fig.add_trace(go.Bar(
-                    x=[row["week_label"]], y=[row["regime_num"]],
-                    marker_color=color_map.get(row["regime_num"], "#64748B"),
-                    name=row["regime_call"],
-                    showlegend=False,
-                    text=row["regime_call"], textposition="inside",
-                ))
+            fig.add_hrect(y0=66, y1=100, fillcolor="#059669", opacity=0.10, line_width=0)
+            fig.add_hrect(y0=34, y1=66, fillcolor="#D97706", opacity=0.10, line_width=0)
+            fig.add_hrect(y0=0, y1=34, fillcolor="#DC2626", opacity=0.10, line_width=0)
+            fig.add_trace(go.Scatter(
+                x=df_h["week_label"], y=df_h["onscore"], mode="lines+markers",
+                line=dict(color="#93C5FD", width=2),
+                marker=dict(size=10, color=[regime_color(r) for r in df_h["regime_call"]],
+                            line=dict(color="#0F172A", width=1)),
+                text=df_h["regime_call"],
+                hovertemplate="%{x}<br>Score %{y} · %{text}<extra></extra>",
+            ))
             fig.update_layout(
-                height=220, margin=dict(t=10, b=10),
-                yaxis=dict(tickvals=[1,2,3], ticktext=["Risk-off","Mixed","Risk-on"]),
+                height=260, margin=dict(t=10, b=10),
+                yaxis=dict(range=[0, 100], title="Risk-on Score"),
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                font_color="#E2E8F0"
+                font_color="#E2E8F0", showlegend=False,
             )
             st.plotly_chart(fig, use_container_width=True)
+            st.caption(t(
+                "Điểm tụt dần qua nhiều tuần thường xuất hiện TRƯỚC khi regime đổi màu — tín hiệu sớm.",
+                "A multi-week downward drift in score often precedes a regime flip — an early signal."
+            ))
     else:
         st.divider()
         st.info(t(
-            "⭐ **Pro** — Xem lịch sử Regime 12 tuần và nhận xét chi tiết mỗi tuần.",
-            "⭐ **Pro** — View 12-week regime history and detailed weekly commentary."
+            "⭐ **Pro** — Xem lịch sử Risk-on Score 12 tuần (cả VN & US) và nhận xét chi tiết mỗi tuần.",
+            "⭐ **Pro** — View 12-week Risk-on Score history (VN & US) and detailed weekly commentary."
         ))
         show_upgrade_cta()
 
-    # Admin input section
+    # ── Admin: form tự sinh theo bộ tín hiệu của thị trường đang chọn ──
     if user.get("username") == "admin" and user["id"] != -1:
         st.divider()
-        with st.expander("⚙️ Admin — Cập nhật Regime Radar tuần này", expanded=False):
+        with st.expander(f"⚙️ Admin — Cập nhật Regime Radar {mk_label[market]}", expanded=False):
             from datetime import date as date_cls
             today = date_cls.today()
             week_num = today.isocalendar()[1]
             default_week = f"Tuần {week_num}/{today.year}"
+            week_label = st.text_input("Nhãn tuần", value=default_week, key=f"rw_{market}")
 
-            c1, c2 = st.columns(2)
-            with c1:
-                week_label = st.text_input("Nhãn tuần", value=default_week)
-                vix_val = st.number_input("VIX", min_value=0.0, value=20.0, step=0.5)
-                vn_ma = st.selectbox("VN-Index vs MA200", ["Trên MA200", "Dưới MA200", "Sát MA200"])
-            with c2:
-                breadth = st.selectbox("Breadth", ["Mạnh", "Trung tính", "Yếu", "Sụp đổ"])
-                credit = st.selectbox("Credit/Lãi suất", ["Ổn định", "Tăng nhẹ", "Căng thẳng", "Khủng hoảng"])
-                margin = st.selectbox("Margin", ["Bình thường", "Đang tăng", "Đang giảm chấp", "Force-sell đang xảy ra"])
+            prev = latest.get("signals", {}) if latest else {}
+            admin_inputs = {}
+            sigs = get_signals(market)
+            half = (len(sigs) + 1) // 2
+            cols = st.columns(2)
+            for i, sig in enumerate(sigs):
+                col = cols[0] if i < half else cols[1]
+                with col:
+                    if sig["type"] == "categorical":
+                        opts = sig["options"]
+                        dv = prev.get(sig["key"], opts[0])
+                        idx = opts.index(dv) if dv in opts else 0
+                        admin_inputs[sig["key"]] = st.selectbox(
+                            sig[f"label_{lang}"], opts, index=idx, key=f"adm_{market}_{sig['key']}"
+                        )
+                    else:
+                        num = sig.get("num", {"min": 0.0, "default": 18.0, "step": 0.5})
+                        dv = prev.get(sig["key"], num["default"])
+                        try:
+                            dv = float(dv)
+                        except (TypeError, ValueError):
+                            dv = num["default"]
+                        admin_inputs[sig["key"]] = st.number_input(
+                            sig[f"label_{lang}"], min_value=num["min"],
+                            value=dv, step=num["step"], key=f"adm_{market}_{sig['key']}"
+                        )
 
-            regime_call = st.selectbox("🎯 Kết luận Regime", ["Risk-on", "Mixed", "Risk-off"])
-            note_vi = st.text_area("Nhận xét tiếng Việt", height=100, placeholder="Tuần này thị trường...")
-            note_en = st.text_area("English commentary", height=100, placeholder="This week the market...")
+            res = compute_regime(admin_inputs, market)
+            arc = regime_color(res["regime"])
+            st.markdown(f"""
+<div style="background:{arc}15; border-left:4px solid {arc}; border-radius:0 8px 8px 0;
+padding:10px 14px; margin:10px 0;">
+  <span style="font-size:12px;color:#94A3B8;">Rubric đề xuất:</span>
+  <strong style="color:{arc}; font-size:18px;"> {res['regime']}</strong>
+  <span style="color:#64748B;font-size:13px;"> · Score {res['onscore']}/100</span><br>
+  <span style="font-size:12px;color:#CBD5E1;">{regime_rationale(res, 'vi')}</span>
+</div>
+""", unsafe_allow_html=True)
 
-            if st.button("💾 Lưu Regime Radar", type="primary"):
-                save_regime_radar(
-                    user["id"], week_label, vix_val, vn_ma,
-                    breadth, credit, margin, regime_call, note_vi, note_en
+            override = st.checkbox("Ghi đè thủ công (không khuyến khích)", value=False, key=f"ovr_{market}")
+            if override:
+                regime_call = st.selectbox(
+                    "🎯 Kết luận Regime (ghi đè)", ["Risk-on", "Mixed", "Risk-off"],
+                    index=["Risk-on", "Mixed", "Risk-off"].index(res["regime"]), key=f"rc_{market}"
                 )
-                st.success("✅ Đã lưu Regime Radar!")
+            else:
+                regime_call = res["regime"]
+
+            note_vi = st.text_area("Nhận xét tiếng Việt", height=100,
+                                   value=regime_rationale(res, "vi"), key=f"nv_{market}")
+            note_en = st.text_area("English commentary", height=100,
+                                   value=regime_rationale(res, "en"), key=f"ne_{market}")
+
+            if st.button("💾 Lưu Regime Radar", type="primary", key=f"save_{market}"):
+                save_regime_v2(user["id"], week_label, admin_inputs,
+                               regime_call, res["onscore"], note_vi, note_en, market=market)
+                st.success(f"✅ Đã lưu Regime Radar ({mk_label[market]})!")
                 st.rerun()
+
+
+def _mirror_records(user_id):
+    """Gộp dữ liệu quyết định: Evening Routine (hồi tố) + AI Coach (bias_events)."""
+    records = []
+    for ev in get_evening_routines(user_id):
+        codes, clean, _traded = biases_from_evening(ev["answers"])
+        records.append({"date": ev["date"], "source": "evening",
+                        "biases": codes, "clean": clean})
+    for e in get_bias_events(user_id):
+        records.append({"date": e["date"], "source": e["source"],
+                        "biases": [e["code"]], "clean": None})
+    return records
+
+
+def page_mirror():
+    st.header(t("🪞 Tấm gương cá nhân", "🪞 Personal Mirror"))
+    gate_pro("Tấm gương cá nhân")
+
+    st.caption(t(
+        "App không chỉ dạy bias chung chung — nó phản chiếu CHÍNH BẠN: bias nào bạn lặp lại "
+        "nhiều nhất, tháng này có khá hơn tháng trước không. Dữ liệu lấy từ Routine Tối & AI Coach của bạn.",
+        "Not generic bias theory — this mirrors YOU: which biases you repeat most, and whether "
+        "this month beats last. Built from your Evening Routines & AI Coach."
+    ))
+
+    from datetime import date as _date
+    user = st.session_state.user
+    records = _mirror_records(user["id"])
+    profile = build_profile(records, _date.today().isoformat())
+    lang = st.session_state.lang
+
+    # ── Empty state trung thực ──
+    if not profile or profile["n_records"] < 3:
+        st.info(t(
+            "🪞 Tấm gương chưa đủ dữ liệu để phản chiếu bạn. Hãy hoàn thành **Routine Tối** vài ngày "
+            "(và dùng **AI Coach** khi ra quyết định) — gương sẽ bắt đầu cho thấy thói quen thật của bạn.",
+            "🪞 Not enough data yet to mirror you. Complete a few **Evening Routines** "
+            "(and use **AI Coach** when deciding) — the mirror will start revealing your real patterns."
+        ))
+        return
+
+    # ── Hàng chỉ số tổng ──
+    c1, c2, c3 = st.columns(3)
+    c1.metric(t("Quyết định đã ghi", "Decisions logged"), profile["n_records"])
+    if profile["clean_rate"] is not None:
+        c2.metric(t("Tỷ lệ kỷ luật", "Clean rate"), f"{profile['clean_rate']}%",
+                  help=t("% lần giao dịch KHÔNG vi phạm kỷ luật nào.",
+                         "% of trades with NO discipline violations."))
+    else:
+        c2.metric(t("Tỷ lệ kỷ luật", "Clean rate"), "—")
+    if profile["top"]:
+        top_code = profile["top"][0][0]
+        c3.metric(t("Bias lặp nhiều nhất", "Top recurring bias"),
+                  BIAS_META[top_code][f"name_{lang}"])
+    else:
+        c3.metric(t("Bias lặp nhiều nhất", "Top recurring bias"),
+                  t("Chưa có 👏", "None yet 👏"))
+
+    if not profile["top"]:
+        st.success(t(
+            "👏 Chưa ghi nhận bias nào trong các quyết định của bạn. Giữ kỷ luật này.",
+            "👏 No biases recorded in your decisions yet. Keep this discipline."
+        ))
+        return
+
+    # ── Vân tay bias (biểu đồ) ──
+    st.divider()
+    st.subheader(t("🔬 Vân tay bias của bạn", "🔬 Your bias fingerprint"))
+    top_items = profile["top"][:6]
+    names = [BIAS_META[c][f"name_{lang}"] for c, _ in top_items]
+    vals = [n for _, n in top_items]
+    colors = [bias_color(c) for c, _ in top_items]
+
+    fig = go.Figure(go.Bar(
+        x=vals, y=names, orientation="h",
+        marker_color=colors,
+        text=vals, textposition="outside",
+    ))
+    fig.update_layout(
+        height=max(180, 46 * len(top_items)),
+        margin=dict(t=10, b=10, l=10, r=20),
+        xaxis=dict(title=t("Số lần xuất hiện", "Times recorded"), dtick=1),
+        yaxis=dict(autorange="reversed"),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        font_color="#E2E8F0", showlegend=False,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── Tháng này vs tháng trước (top 3) ──
+    st.subheader(t("📅 Tháng này vs tháng trước", "📅 This month vs last"))
+    rows_html = ""
+    for code, _total in profile["top"][:3]:
+        imp = profile["improvement"][code]
+        rec, pri = imp["recent"], imp["prior"]
+        if rec < pri:
+            arrow, col, msg = "▼", "#059669", t("đang cải thiện", "improving")
+        elif rec > pri:
+            arrow, col, msg = "▲", "#DC2626", t("đang tệ hơn", "getting worse")
+        else:
+            arrow, col, msg = "▬", "#94A3B8", t("không đổi", "unchanged")
+        nm = BIAS_META[code][f"name_{lang}"]
+        rows_html += f"""
+<tr style="border-bottom:1px solid rgba(148,163,184,.12);">
+  <td style="padding:7px 8px; font-weight:600; font-size:13.5px;">{nm}</td>
+  <td style="padding:7px 8px; text-align:center; color:#94A3B8; font-size:13px;">{pri}</td>
+  <td style="padding:7px 8px; text-align:center; color:#CBD5E1; font-size:13px;">{rec}</td>
+  <td style="padding:7px 8px; text-align:right; color:{col}; font-weight:700; font-size:13px;">{arrow} {msg}</td>
+</tr>"""
+    st.markdown(f"""
+<table style="width:100%; border-collapse:collapse;">
+  <thead><tr style="color:#64748B; font-size:11px; text-transform:uppercase;">
+    <th style="text-align:left; padding:4px 8px;">Bias</th>
+    <th style="text-align:center; padding:4px 8px;">{t('Tháng trước','Last')}</th>
+    <th style="text-align:center; padding:4px 8px;">{t('Tháng này','This')}</th>
+    <th style="text-align:right; padding:4px 8px;">{t('Xu hướng','Trend')}</th>
+  </tr></thead>
+  <tbody>{rows_html}</tbody>
+</table>
+""", unsafe_allow_html=True)
+    st.caption(t("Cửa sổ 30 ngày gần nhất so với 30 ngày trước đó.",
+                 "Last 30 days vs the 30 days before that."))
+
+    # ── Top 3 bias + cách sửa cá nhân hóa ──
+    st.divider()
+    st.subheader(t("🎯 3 bias cần xử lý trước", "🎯 Top 3 biases to fix first"))
+    for code, total in profile["top"][:3]:
+        meta = BIAS_META[code]
+        col = bias_color(code)
+        st.markdown(f"""
+<div style="background:{col}12; border-left:4px solid {col}; border-radius:0 8px 8px 0;
+padding:10px 14px; margin:8px 0;">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <strong style="color:{col}; font-size:15px;">{meta[f'name_{lang}']}</strong>
+    <span style="font-size:12px; color:#94A3B8;">{t('đã ghi','recorded')} {total}×</span>
+  </div>
+  <div style="font-size:13px; color:#CBD5E1; margin-top:4px;">{meta[f'fix_{lang}']}</div>
+</div>
+""", unsafe_allow_html=True)
+
+    st.caption(t(
+        "Gương phản chiếu những gì bạn đã ghi lại. Càng ghi đều (Routine Tối, AI Coach), "
+        "gương càng trung thực — và bạn càng dễ thấy mình đang tiến bộ.",
+        "The mirror reflects what you log. The more consistently you record (Evening Routine, "
+        "AI Coach), the more honest it gets — and the easier to see your progress."
+    ))
+
+
+def page_execution_check():
+    st.header(t("🧰 Bạn có mắc lỗi thực thi không?", "🧰 Do You Make Execution Errors?"))
+    st.caption(t(
+        "Nhiều người nhận định ĐÚNG mà vẫn lỗ — vì lỗi thực thi: cách vào, ra, quản lệnh. "
+        "Tự kiểm tra thật lòng.",
+        "Many people are RIGHT and still lose — because of execution errors: how they enter, exit, "
+        "manage trades. Self-check honestly."
+    ))
+
+    st.divider()
+    st.markdown(t("**Đánh dấu những điều ĐÚNG với bạn:**", "**Check everything that is TRUE for you:**"))
+
+    lang = st.session_state.lang
+    checked = []
+    for i, item in enumerate(EXECUTION_CHECKLIST):
+        if st.checkbox(item[lang], key=f"exec_{i}"):
+            checked.append(i)
+
+    st.divider()
+    if st.button(t("🔍 Xem kết quả", "🔍 See Result"), type="primary", use_container_width=True):
+        n = len(checked)
+        total = len(EXECUTION_CHECKLIST)
+
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.metric(t("Lỗi thực thi", "Execution errors"), f"{n}/{total}")
+        with col2:
+            if n == 0:
+                st.success(t(
+                    "🟢 **Kỷ luật thực thi tốt.** Bạn không có lỗi thực thi nào trong danh sách. Duy trì điều này.",
+                    "🟢 **Strong execution discipline.** No execution errors from the list. Keep it up."
+                ))
+            elif n <= 2:
+                st.info(t(
+                    "🟡 **Khá tốt.** Chỉ vài lỗi thực thi. Sửa chúng để luận điểm đúng không bị thực thi phá hỏng.",
+                    "🟡 **Pretty good.** Only a few execution errors. Fix them so good theses aren't ruined by execution."
+                ))
+            elif n <= 5:
+                st.warning(t(
+                    "🟠 **Cảnh báo.** Nhiều lỗi thực thi đang bào mòn tài khoản dù bạn có thể nhận định đúng.",
+                    "🟠 **Warning.** Several execution errors are eroding your account even if your thesis is right."
+                ))
+            else:
+                st.error(t(
+                    "🔴 **Nguy hiểm.** Thực thi đang là nguyên nhân chính khiến tài khoản cháy — không phải nhận định.",
+                    "🔴 **Dangerous.** Execution — not your thesis — is the main reason the account is burning."
+                ))
+
+        if checked:
+            st.divider()
+            st.markdown(t("**Những điểm bạn cần sửa:**", "**What you need to fix:**"))
+            for i in checked:
+                item = EXECUTION_CHECKLIST[i]
+                st.markdown(f"""
+<div style="background:rgba(220,38,38,0.07); border-left:4px solid #DC2626; border-radius:0 8px 8px 0;
+padding:9px 13px; margin:7px 0;">
+  <div style="font-size:13.5px; color:#E2E8F0;">{item[f'fix_{lang}']}</div>
+  <div style="font-size:11px; color:#64748B; margin-top:3px;">📖 {item.get('lesson','')}</div>
+</div>
+""", unsafe_allow_html=True)
+
+        st.divider()
+        st.info(t(
+            "💡 Đọc **Bài 12 — Lỗi thực thi: thua dù luận điểm đúng** để hiểu sâu từng lỗi và cách phòng.",
+            "💡 Read **Lesson 12 — Execution errors: losing despite a correct thesis** for the full breakdown."
+        ))
 
 
 # ─── PORTFOLIO RISK CHECKER ────────────────────────────────────────────────────
