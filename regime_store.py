@@ -11,25 +11,37 @@ from regime_engine import to_legacy_fields
 
 
 def _ensure_table(conn):
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS regime_v2 (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            week_label TEXT NOT NULL,
-            market TEXT DEFAULT 'vn',
-            signals_json TEXT,
-            regime_call TEXT,
-            onscore INTEGER,
-            note_vi TEXT,
-            note_en TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    # Migration: thêm cột market cho DB cũ (đã có bảng nhưng chưa có cột)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS regime_v2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                week_label TEXT NOT NULL,
+                market TEXT DEFAULT 'vn',
+                signals_json TEXT,
+                regime_call TEXT,
+                onscore INTEGER,
+                note_vi TEXT,
+                note_en TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    # Migration: thêm cột market cho DB cũ (đã có bảng nhưng chưa có cột).
+    # Trên Postgres, lệnh lỗi (cột đã tồn tại) làm HỎNG transaction → phải rollback
+    # để các truy vấn sau (SELECT) còn chạy được. SQLite thì rollback vô hại.
     try:
         conn.execute("ALTER TABLE regime_v2 ADD COLUMN market TEXT DEFAULT 'vn'")
         conn.commit()
     except Exception:
-        pass  # cột đã tồn tại
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
 
 def save_regime_v2(user_id, week_label, signals, regime_call, onscore, note_vi, note_en, market="vn"):

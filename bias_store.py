@@ -11,17 +11,24 @@ from database import get_conn
 
 
 def _ensure_events(conn):
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS bias_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            source TEXT,
-            bias_code TEXT,
-            detail TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    """)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bias_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                source TEXT,
+                bias_code TEXT,
+                detail TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
 
 def log_biases(user_id, source, codes, detail=""):
