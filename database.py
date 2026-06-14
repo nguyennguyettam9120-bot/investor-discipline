@@ -303,22 +303,6 @@ def init_db():
 
 # ─── AUTH ──────────────────────────────────────────────────────────────────────
 
-def _notify_admin_async(event_type, username, email=None, extra=None):
-    """Gửi email thông báo cho admin ở luồng nền (daemon thread) để KHÔNG làm
-    chậm thao tác của user và KHÔNG bao giờ làm crash app nếu email lỗi."""
-    def _run():
-        try:
-            import integrations
-            integrations.send_admin_notification(event_type, username, email=email, extra=extra)
-        except Exception:
-            pass
-    try:
-        import threading
-        threading.Thread(target=_run, daemon=True).start()
-    except Exception:
-        pass
-
-
 def register_user(username, email, password):
     conn = get_conn()
     try:
@@ -328,7 +312,6 @@ def register_user(username, email, password):
             (username.strip().lower(), email.strip().lower(), pw_hash)
         )
         conn.commit()
-        _notify_admin_async("signup", username.strip().lower(), email=email.strip().lower())
         return True, "ok"
     except IntegrityError as e:
         try:
@@ -375,18 +358,7 @@ def upgrade_user_plan(user_id, plan="pro"):
     conn = get_conn()
     conn.execute("UPDATE users SET plan=? WHERE id=?", (plan, user_id))
     conn.commit()
-    # Lấy thông tin user để thông báo cho admin (chỉ khi nâng lên pro)
-    info = None
-    if plan == "pro":
-        try:
-            info = conn.execute(
-                "SELECT username, email FROM users WHERE id=?", (user_id,)
-            ).fetchone()
-        except Exception:
-            info = None
     conn.close()
-    if plan == "pro" and info:
-        _notify_admin_async("upgrade", info["username"], email=info["email"])
 
 
 # ─── JOURNAL ───────────────────────────────────────────────────────────────────
@@ -560,11 +532,37 @@ def admin_set_plan(user_id, plan):
 
 def admin_delete_user(user_id):
     conn = get_conn()
-    for tbl in ["journal", "historical_results", "challenge_progress",
-                "learning_memory", "curriculum_completion", "subscriptions"]:
-        conn.execute(f"DELETE FROM {tbl} WHERE user_id=?", (user_id,))
-    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
-    conn.commit()
+    # Mọi bảng tham chiếu users(id) — phải dọn TRƯỚC khi xóa user (Postgres chặn FK).
+    # (bảng, cột). Mỗi lệnh tự commit; nếu bảng chưa tồn tại (vd bias_events tạo lười)
+    # thì rollback và bỏ qua, không làm hỏng transaction của Postgres.
+    child = [
+        ("journal", "user_id"), ("historical_results", "user_id"),
+        ("challenge_progress", "user_id"), ("learning_memory", "user_id"),
+        ("curriculum_completion", "user_id"), ("subscriptions", "user_id"),
+        ("regime_radar", "user_id"), ("daily_activity", "user_id"),
+        ("ai_usage", "user_id"), ("payment_orders", "user_id"),
+        ("routines", "user_id"), ("community_feed", "user_id"),
+        ("market_news", "user_id"), ("custom_daily_challenges", "user_id"),
+        ("bias_events", "user_id"),
+        ("referrals", "referrer_id"), ("referrals", "referred_id"),
+    ]
+    for tbl, col in child:
+        try:
+            conn.execute(f"DELETE FROM {tbl} WHERE {col}=?", (user_id,))
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    try:
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
     conn.close()
 
 def admin_get_daily_signups(days=30):
